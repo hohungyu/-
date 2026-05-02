@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>台北交通查詢</title>
+    <style>
+        :root {
+            --radius-24: 24px;
+            --bg-light: #f5f7fa;
+            --glass-white: rgba(255, 255, 255, 0.9);
+            --glass-accent: rgba(255, 255, 255, 0.7);
+            --mrt-blue: #005eb8;
+            --bus-red: #d0021b;
+            --ubike-yellow: #ffb81c;
+            --text-dark: #2c3e50;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: "PingFang TC", "Microsoft JhengHei", sans-serif;
+            background-color: var(--bg-light);
+            color: var(--text-dark);
+            padding: 20px;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1100px;
+            height: 94vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .header-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            margin-bottom: 5px;
+        }
+        .weather-box { display: flex; align-items: center; }
+        .weather-icon { font-size: 32px; margin-right: 12px; }
+        .temp-val { font-size: 28px; font-weight: 900; }
+        .location-info { font-size: 14px; color: #7f8c8d; font-weight: 700; margin-left: 12px; }
+
+        .alert-ticker {
+            background: #ffffff;
+            border: 1px solid #e0e6ed;
+            border-radius: 12px;
+            padding: 8px 20px;
+            margin-bottom: 10px;
+            overflow: hidden;
+            font-size: 14px;
+        }
+        .ticker-scroll {
+            display: inline-block;
+            white-space: nowrap;
+            animation: scroll-text 30s linear infinite;
+            font-weight: 700;
+            color: #5d6d7e;
+        }
+        @keyframes scroll-text {
+            0% { transform: translateX(900px); }
+            100% { transform: translateX(-100%); }
+        }
+
+        .page-header {
+            font-size: 32px;
+            font-weight: 900;
+            margin-bottom: 10px;
+            letter-spacing: -1.5px;
+        }
+
+        .status-panel {
+            background: var(--glass-accent);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            padding: 18px 30px;
+            border-radius: var(--radius-24);
+            margin-bottom: 15px;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.04);
+        }
+        .label-text { font-size: 12px; color: #95a5a6; letter-spacing: 1.5px; font-weight: 800; }
+        .station-name { font-size: 26px; font-weight: 900; color: #27ae60; margin-top: 5px; }
+
+        .nav-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            flex-grow: 1;
+        }
+
+        .card {
+            background: var(--glass-white);
+            border-radius: var(--radius-24);
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.03);
+            border: 1px solid rgba(255, 255, 255, 0.8);
+        }
+
+        .top-indicator { width: 5px; height: 35px; border-radius: 10px; margin-bottom: 15px; }
+        .emoji-icon { font-size: 32px; margin-bottom: 15px; }
+
+        .btn-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .main-btn {
+            display: block;
+            width: 100%;
+            padding: 14px 10px;
+            background: #fff;
+            color: var(--text-dark);
+            text-decoration: none;
+            text-align: center;
+            font-weight: 800;
+            font-size: 14px;
+            border-radius: 14px;
+            border: 1px solid #eceff1;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        /* 官方網站按鈕 - 移至上方且美化 */
+        .official-btn {
+            margin-bottom: 5px; /* 與下方按鈕拉開一點點距離 */
+            background-color: transparent;
+            font-weight: 900;
+        }
+
+        .mrt-official { border: 2.5px solid var(--mrt-blue); color: var(--mrt-blue); }
+        .mrt-official:hover { background-color: var(--mrt-blue); color: #fff; }
+
+        .bus-official { border: 2.5px solid var(--bus-red); color: var(--bus-red); }
+        .bus-official:hover { background-color: var(--bus-red); color: #fff; }
+
+        .ubike-official { border: 2.5px solid var(--ubike-yellow); color: #8a6d00; }
+        .ubike-official:hover { background-color: var(--ubike-yellow); color: #fff; }
+
+        .main-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 15px rgba(0,0,0,0.1);
+        }
+
+        .card-info { margin-top: auto; padding-top: 20px; }
+        .card-title { font-size: 22px; font-weight: 900; }
+        .card-desc { font-size: 12px; color: #95a5a6; margin-top: 2px; font-weight: 600; }
+
+        @media (max-width: 900px) {
+            body { height: auto; overflow: auto; align-items: flex-start; }
+            .container { height: auto; }
+            .nav-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="header-info">
+            <div class="weather-box">
+                <div class="weather-icon" id="w-icon">⌛</div>
+                <div class="temp-val" id="temp-display">--°C</div>
+                <div class="location-info" id="loc-display">定位中...</div>
+            </div>
+        </div>
+
+        <div class="alert-ticker">
+            <div class="ticker-scroll">
+                <span class="ticker-item">⚠️ 台北捷運各線營運正常。</span>
+                <span class="ticker-item">🚲 YouBike 2.0 系統狀態：良好。</span>
+                <span class="ticker-item">📍 系統已自動偵測您的當前位置與氣溫。</span>
+            </div>
+        </div>
+
+        <h1 class="page-header">台北交通查詢</h1>
+
+        <div class="status-panel">
+            <div class="label-text">NEAREST STATION | 最近車站</div>
+            <div class="station-name" id="st-display">取得定位權限中...</div>
+        </div>
+
+        <div class="nav-grid">
+            <!-- 捷運區塊 -->
+            <div class="card">
+                <div class="top-indicator" style="background: var(--mrt-blue);"></div>
+                <div class="emoji-icon">🚇</div>
+                <div class="btn-group">
+                    <a href="https://www.metro.taipei/" target="_blank" class="main-btn official-btn mrt-official">台北捷運 官方網站</a>
+                    <a href="file:///Users/hehongyu/Downloads/gemini-code-1777725110272.html" target="_blank" class="main-btn">捷運路網圖 1</a>
+                    <a href="file:///Users/hehongyu/Downloads/B%E7%8F%AD_B11405108_%E9%82%B1%E5%89%87%E7%B6%AD_0427%E5%8F%B0%E5%8C%97%E6%8D%B7%E9%81%8B.html.html" target="_blank" class="main-btn">捷運路網圖 2</a>
+                </div>
+                <div class="card-info">
+                    <h2 class="card-title">捷運動態</h2>
+                    <p class="card-desc">官方與自訂版本區分</p>
+                </div>
+            </div>
+
+            <!-- 公車區塊 -->
+            <div class="card">
+                <div class="top-indicator" style="background: var(--bus-red);"></div>
+                <div class="emoji-icon">🚌</div>
+                <div class="btn-group">
+                    <a href="https://ebus.gov.taipei/" target="_blank" class="main-btn official-btn bus-official">台北公車 官方網站</a>
+                    <a href="file:///Users/hehongyu/Downloads/%E5%8F%B0%E5%8C%97%E5%85%AC%E8%BB%8A%E6%9F%A5%E8%A9%A2.html" target="_blank" class="main-btn">台北市公車動態 1</a>
+                    <a href="file:///Users/hehongyu/Downloads/%E5%8F%B0%E5%8C%97%E7%AD%89%E5%85%AC%E8%BB%8A-%E6%B8%AC%E8%A9%A6%E7%89%88.html" target="_blank" class="main-btn">台北市公車動態 2</a>
+                    <a href="file:///Users/hehongyu/Downloads/%E5%85%AC%E8%BB%8AV3.html" target="_blank" class="main-btn">台北市公車動態 3</a>
+                </div>
+                <div class="card-info">
+                    <h2 class="card-title">公車動態</h2>
+                    <p class="card-desc">官方與自訂版本區分</p>
+                </div>
+            </div>
+
+            <!-- YouBike 區塊 -->
+            <div class="card">
+                <div class="top-indicator" style="background: var(--ubike-yellow);"></div>
+                <div class="emoji-icon">🚲</div>
+                <div class="btn-group">
+                    <a href="https://www.youbike.com.tw/region/taipei/" target="_blank" class="main-btn official-btn ubike-official">YouBike 官方網站</a>
+                    <a href="file:///Users/hehongyu/Downloads/B11405106_ubike%202.html" target="_blank" class="main-btn">站點即時車位 1</a>
+                    <a href="https://www.youbike.com.tw/region/taipei/stations/" target="_blank" class="main-btn">站點即時車位 2</a>
+                </div>
+                <div class="card-info">
+                    <h2 class="card-title">微笑單車</h2>
+                    <p class="card-desc">官方與自訂版本區分</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 設定常用的捷運站座標，用於計算最近站點
+        const MRT_STATIONS = [
+            { name: "捷運公館站", lat: 25.0129, lng: 121.5347 },
+            { name: "捷運台北車站", lat: 25.0477, lng: 121.5170 },
+            { name: "捷運市政府站", lat: 25.0400, lng: 121.5646 },
+            { name: "捷運忠孝復興站", lat: 25.0415, lng: 121.5436 },
+            { name: "捷運六張犁站", lat: 25.0238, lng: 121.5531 }
+        ];
+
+        function init() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(updateUI, (error) => {
+                    document.getElementById('st-display').innerText = "權限未開啟 (點擊鎖頭允許)";
+                }, { timeout: 8000 });
+            }
+        }
+
+        async function updateUI(pos) {
+            const lat = pos.coords.latitude;
+            const lng = pos.coords.longitude;
+            const display = document.getElementById('st-display');
+            display.style.color = "#27ae60";
+
+            let nearest = MRT_STATIONS[0];
+            let minDist = Infinity;
+            MRT_STATIONS.forEach(st => {
+                const dist = Math.sqrt(Math.pow(st.lat - lat, 2) + Math.pow(st.lng - lng, 2));
+                if (dist < minDist) { minDist = dist; nearest = st; }
+            });
+            display.innerText = nearest.name;
+
+            try {
+                const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current_weather=true`);
+                const data = await res.json();
+                document.getElementById('temp-display').innerText = `${Math.round(data.current_weather.temperature)}°C`;
+                document.getElementById('loc-display').innerText = `座標: ${lat.toFixed(2)}, ${lng.toFixed(2)}`;
+                document.getElementById('w-icon').innerText = data.current_weather.weathercode < 3 ? "☀️" : "☁️";
+            } catch (e) {}
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
