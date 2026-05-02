@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>北捷全路網監控系統 - 最終補完版</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        :root { 
+            --panel-shadow: 0 20px 60px rgba(0,0,0,0.15);
+            --radius-xl: 30px;
+            --radius-m: 18px;
+            --color-parallel: #001A33; /* 深夜藍 */
+            --color-tra: #005696;      /* 台鐵藍 */
+            --color-hsr: #f58220;      /* 高鐵橘 */
+            --color-outside: #FF4500;  /* 站外轉乘橘紅 */
+            --color-in-walk: #6c757d;  /* 站內步行轉乘灰 */
+        }
+        
+        body, html { margin: 0; padding: 0; height: 100%; font-family: "PingFang TC", "Microsoft JhengHei", sans-serif; background: #fff; overflow: hidden; }
+        #map { position: absolute; top: 0; bottom: 0; left: 0; right: 0; z-index: 1; }
+        
+        /* UI 容器加強固定 */
+        #ui-container { position: absolute; top: 20px; left: 20px; width: 400px; max-height: calc(100vh - 40px); z-index: 1000; pointer-events: none; display: flex; flex-direction: column; }
+        .glass-panel { 
+            background: rgba(255, 255, 255, 0.95); border-radius: var(--radius-xl); padding: 25px; 
+            box-shadow: var(--panel-shadow); pointer-events: auto; backdrop-filter: blur(20px); border: 1px solid rgba(0,0,0,0.05);
+            display: flex; flex-direction: column; overflow: hidden;
+        }
+
+        .header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-shrink: 0; }
+        #current-time { font-family: monospace; font-size: 14px; font-weight: 800; color: #333; }
+
+        select { 
+            width: 100%; padding: 16px; border-radius: var(--radius-m); border: 2px solid #f2f2f2; 
+            font-size: 16px; font-weight: 700; margin-bottom: 12px; cursor: pointer; background: #fff; outline: none; appearance: none;
+            transition: border 0.3s; flex-shrink: 0;
+        }
+        select:focus { border-color: #000; }
+
+        .badge { font-size: 11px; padding: 6px 12px; border-radius: 6px; font-weight: 800; color: #fff; margin-top: 6px; display: inline-block; margin-right: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .badge-parallel { background: var(--color-parallel); border-left: 4px solid #fff; }
+        .badge-tra { background: var(--color-tra); }
+        .badge-hsr { background: var(--color-hsr); }
+        .badge-outside { background: var(--color-outside); animation: pulse 1.5s infinite; }
+        .badge-in-walk { background: var(--color-in-walk); }
+
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); opacity: 0.8; } 100% { transform: scale(1); } }
+
+        /* 滾動區域優化 */
+        #arrival-board { margin-top: 20px; display: none; overflow-y: auto; padding-right: 10px; flex-grow: 1; }
+        .station-header { margin-bottom: 15px; border-bottom: 3px solid #f8f8f8; padding-bottom: 15px; }
+        .station-title { font-size: 32px; font-weight: 900; color: #1a1a1a; margin: 0; }
+        
+        .route-card { background: #fff; border-radius: var(--radius-m); border: 1px solid #f0f0f0; overflow: hidden; margin-bottom: 15px; }
+        .route-header { padding: 12px 20px; color: #fff; font-size: 14px; font-weight: 800; display: flex; justify-content: space-between; }
+        .arrival-item { display: flex; justify-content: space-between; padding: 14px 20px; align-items: center; border-bottom: 1px solid #f9f9f9; }
+        .time-value { font-size: 24px; font-weight: 900; color: #000; }
+        .unit { font-size: 12px; color: #aaa; margin-left: 3px; font-weight: normal; }
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+<div id="ui-container">
+    <div class="glass-panel">
+        <div class="header-row">
+            <div style="font-weight: 900; font-size: 18px;">TRTC MONITOR</div>
+            <div id="current-time">00:00:00</div>
+        </div>
+        <select id="line-select" onchange="initLine();">
+            <option value="">選擇營運路線</option>
+            <option value="BL">板南線 (Bannan Line)</option>
+            <option value="R">淡水信義線 (Tamsui-Xinyi Line)</option>
+            <option value="G">松山新店線 (Songshan-Xindian Line)</option>
+            <option value="O">中和新蘆線 (Zhonghe-Xinlu Line)</option>
+            <option value="BR">文湖線 (Wenhu Line)</option>
+            <option value="Y">環狀線 (Circular Line)</option>
+        </select>
+        <select id="station-select" onchange="focusStation();">
+            <option value="">選擇車站</option>
+        </select>
+        <div id="arrival-board"></div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    const TRANSFERS = {
+        "西門": { p: true, i: false, o: false, t: false, h: false, note: "平行轉乘：藍線與綠線同層" },
+        "中正紀念堂": { p: true, i: false, o: false, t: false, h: false, note: "平行轉乘：紅線與綠線同層" },
+        "古亭": { p: true, i: false, o: false, t: false, h: false, note: "平行轉乘：綠線與橘線同層" },
+        "東門": { p: true, i: false, o: false, t: false, h: false, note: "平行轉乘：紅線與橘線同層" },
+        "台北車站": { p: false, i: true, o: false, t: true, h: true, note: "三鐵共構：站內步行轉乘" },
+        "板橋": { p: false, i: true, o: true, t: true, h: true, note: "三鐵共構：捷運/台鐵/高鐵 (含站外轉乘)" },
+        "南港": { p: false, i: true, o: false, t: true, h: true, note: "三鐵共構：站內步行轉乘" },
+        "大坪林": { p: false, i: false, o: true, t: false, h: false, note: "站外轉乘：綠線與黃線" },
+        "景安": { p: false, i: true, o: false, t: false, h: false, note: "站內轉乘：橘線與黃線" },
+        "忠孝新生": { p: false, i: true, o: false, t: false, h: false, note: "站內轉乘：藍線與橘線" },
+        "忠孝復興": { p: false, i: true, o: false, t: false, h: false, note: "站內轉乘：藍線與棕線" },
+        "民權西路": { p: false, i: true, o: false, t: false, h: false, note: "站內轉乘：紅線與橘線" },
+        "松江南京": { p: false, i: true, o: false, t: false, h: false, note: "站內轉乘：綠線與橘線" }
+    };
+
+    // 站點全量補完 (包含主要路網所有端點與中間站)
+    const DATA = {
+        "BL": { name: "板南線", color: "#005eb8", dir: ["往 頂埔", "往 南港展覽館"], sts: [
+            ["BL01","頂埔",24.9601,121.4205],["BL02","永寧",24.9711,121.4363],["BL03","土城",24.9824,121.4442],["BL04","海山",24.9912,121.4532],["BL05","亞東醫院",25.0011,121.4621],["BL06","府中",25.0085,121.4593],["BL07","板橋",25.0135,121.4623],["BL08","新埔",25.0232,121.4682],["BL09","江子翠",25.0301,121.4745],["BL10","龍山寺",25.0354,121.4998],["BL11","西門",25.0423,121.5083],["BL12","台北車站",25.0465,121.5173],["BL13","善導寺",25.0445,121.5264],["BL14","忠孝新生",25.0422,121.5328],["BL15","忠孝復興",25.0412,121.5432],["BL16","忠孝敦化",25.0413,121.5488],["BL17","國父紀念館",25.0413,121.5583],["BL18","市政府",25.0406,121.5651],["BL19","永春",25.0405,121.5762],["BL20","後山埤",25.0451,121.5815],["BL21","昆陽",25.0505,121.5934],["BL22","南港",25.0531,121.6069],["BL23","南港展覽館",25.0553,121.6175]]},
+        "R": { name: "淡水信義線", color: "#e3002c", dir: ["往 象山", "往 淡水"], sts: [
+            ["R02","象山",25.0287,121.5714],["R03","台北101",25.0330,121.5654],["R04","信義安和",25.0332,121.5518],["R05","大安",25.0329,121.5435],["R06","大安森林公園",25.0333,121.5358],["R07","東門",25.0338,121.5283],["R08","中正紀念堂",25.0327,121.5183],["R09","台大醫院",25.0411,121.5161],["R10","台北車站",25.0475,121.5171],["R11","中山",25.0526,121.5204],["R12","雙連",25.0583,121.5203],["R13","民權西路",25.0624,121.5195],["R14","圓山",25.0715,121.5212],["R15","劍潭",25.0847,121.5244],["R16","士林",25.0932,121.5263],["R17","芝山",25.1034,121.5226],["R18","明德",25.1098,121.5191],["R19","石牌",25.1154,121.5152],["R20","唭哩岸",25.1206,121.5065],["R21","奇岩",25.1251,121.5009],["R22","北投",25.1317,121.4986],["R23","復興崗",25.1373,121.4855],["R24","忠義",25.1310,121.4735],["R25","關渡",25.1245,121.4673],["R26","竹圍",25.1368,121.4589],["R27","紅樹林",25.1540,121.4585],["R28","淡水",25.1677,121.4455]]},
+        "G": { name: "松山新店線", color: "#008659", dir: ["往 新店", "往 松山"], sts: [
+            ["G01","新店",24.9578,121.5376],["G02","新店區公所",24.9675,121.5414],["G03","七張",24.9752,121.5429],["G04","大坪林",24.9824,121.5413],["G05","景美",24.9918,121.5407],["G06","萬隆",25.0019,121.5404],["G07","公館",25.0136,121.5348],["G08","台電大樓",25.0207,121.5283],["G09","古亭",25.0263,121.5226],["G10","中正紀念堂",25.0327,121.5183],["G11","小南門",25.0354,121.5061],["G12","西門",25.0423,121.5083],["G13","北門",25.0491,121.5093],["G14","中山",25.0526,121.5204],["G15","松江南京",25.0512,121.5332],["G16","南京復興",25.0516,121.5440],["G17","台北小巨蛋",25.0515,121.5540],["G18","南京三民",25.0514,121.5638],["G19","松山",25.0501,121.5777]]},
+        "O": { name: "中和新蘆線", color: "#f8b61c", dir: ["往 南勢角", "往 迴龍/蘆洲"], sts: [
+            ["O01","南勢角",24.9898,121.5090],["O02","景安",24.9918,121.5051],["O03","永安市場",25.0034,121.5113],["O04","頂溪",25.0128,121.5156],["O05","古亭",25.0263,121.5226],["O06","東門",25.0338,121.5283],["O07","忠孝新生",25.0422,121.5328],["O08","松江南京",25.0512,121.5332],["O09","行天宮",25.0592,121.5332],["O10","中山國小",25.0628,121.5262],["O11","民權西路",25.0624,121.5195],["O12","大橋頭",25.0636,121.5127],["O13","台北橋",25.0632,121.5015],["O14","菜寮",25.0594,121.4925],["O15","三重",25.0558,121.4842],["O16","先嗇宮",25.0465,121.4722],["O17","頭前庄",25.0392,121.4619],["O18","新莊",25.0354,121.4526],["O19","輔大",25.0329,121.4363],["O20","丹鳳",25.0291,121.4230],["O21","迴龍",25.0219,121.4113]]},
+        "BR": { name: "文湖線", color: "#c48c31", dir: ["往 動物園", "往 南港展覽館"], sts: [
+            ["BR01","動物園",24.9982,121.5811],["BR02","木柵",24.9979,121.5739],["BR03","萬芳社區",24.9986,121.5684],["BR04","萬芳醫院",24.9994,121.5583],["BR05","辛亥",25.0051,121.5558],["BR06","麟光",25.0185,121.5588],["BR07","六張犁",25.0237,121.5531],["BR08","科技大樓",25.0261,121.5436],["BR09","大安",25.0329,121.5435],["BR10","忠孝復興",25.0412,121.5432],["BR11","南京復興",25.0516,121.5440],["BR12","中山國中",25.0607,121.5442],["BR13","松山機場",25.0645,121.5518],["BR14","大直",25.0795,121.5471],["BR15","劍南路",25.0848,121.5556],["BR16","西湖",25.0821,121.5672],["BR17","港墘",25.0800,121.5751],["BR18","文德",25.0785,121.5847],["BR19","內湖",25.0838,121.5940],["BR20","大湖公園",25.0837,121.6030],["BR21","葫洲",25.0728,121.6074],["BR22","東湖",25.0671,121.6115],["BR23","南港軟體園區",25.0599,121.6160],["BR24","南港展覽館",25.0553,121.6175]]},
+        "Y": { name: "環狀線", color: "#ffdb00", dir: ["往 大坪林", "往 新北產業園區"], sts: [
+            ["Y07","大坪林",24.9824,121.5413],["Y08","十四張",24.9825,121.5300],["Y09","秀朗橋",24.9926,121.5234],["Y10","景平",24.9936,121.5152],["Y11","景安",24.9918,121.5051],["Y12","中和",25.0016,121.4965],["Y13","橋和",25.0061,121.4900],["Y14","中原",25.0084,121.4842],["Y15","板新",25.0125,121.4725],["Y16","板橋",25.0153,121.4632],["Y17","新埔民生",25.0261,121.4674],["Y18","頭前庄",25.0392,121.4619],["Y19","幸福",25.0506,121.4601],["Y20","新北產業園區",25.0615,121.4593]]}
+    };
+
+    let map, routeLayers = [], mainPin;
+
+    window.onload = () => {
+        map = L.map('map', {zoomControl: false, attributionControl: false}).setView([25.047, 121.51], 13);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(map);
+        
+        setInterval(() => { 
+            document.getElementById('current-time').innerText = new Date().toLocaleTimeString('zh-TW', {hour12:false}); 
+        }, 1000);
+    };
+
+    function initLine() {
+        const key = document.getElementById('line-select').value;
+        const sSel = document.getElementById('station-select');
+        sSel.innerHTML = '<option value="">選擇車站</option>';
+        if(!key) return;
+        
+        // 站點依照編號排序
+        DATA[key].sts.sort((a,b)=>a[0].localeCompare(b[0])).forEach(s => {
+            sSel.add(new Option(`${s[0]} ${s[1]}`, s[1]));
+        });
+        drawNetwork([{k: key}], true);
+    }
+
+    function drawNetwork(matches, autoFit) {
+        routeLayers.forEach(l => map.removeLayer(l));
+        routeLayers = [];
+        const bounds = [];
+        const activeLine = document.getElementById('line-select').value;
+        const keys = [...new Set([activeLine, ...matches.map(m => m.k)])];
+
+        keys.forEach(k => {
+            const line = DATA[k];
+            if(!line) return;
+            const pts = line.sts.map(s => { bounds.push([s[2], s[3]]); return [s[2], s[3]]; });
+            routeLayers.push(L.polyline(pts, {
+                color: line.color, 
+                weight: (k === activeLine)?10:5, 
+                opacity: (k === activeLine)?1:0.3, 
+                lineJoin: 'round'
+            }).addTo(map));
+        });
+        if(autoFit && bounds.length) map.fitBounds(bounds, {padding: [50,50]});
+    }
+
+    function focusStation() {
+        const name = document.getElementById('station-select').value;
+        if(!name) return;
+        const matches = [];
+        for(let k in DATA) {
+            const f = DATA[k].sts.find(s => s[1] === name);
+            if(f) matches.push({ k: k, id: f[0], pos: [f[2], f[3]] });
+        }
+        drawNetwork(matches, false);
+        map.flyTo(matches[0].pos, 15);
+        if(mainPin) map.removeLayer(mainPin);
+        mainPin = L.circleMarker(matches[0].pos, {radius: 14, color: '#000', weight: 4, fillColor: '#fff', fillOpacity: 1}).addTo(map);
+        renderBoard(name, matches);
+    }
+
+    function renderBoard(name, matches) {
+        const board = document.getElementById('arrival-board');
+        board.style.display = 'block';
+        const info = TRANSFERS[name];
+        let html = `<div class="station-header"><h1 class="station-title">${name}</h1>`;
+        
+        if(info) {
+            if(info.p) html += `<span class="badge badge-parallel">平行轉乘</span>`;
+            if(info.i) html += `<span class="badge badge-in-walk">站內轉乘</span>`;
+            if(info.o) html += `<span class="badge badge-outside">站外轉乘</span>`;
+            if(info.t) html += `<span class="badge badge-tra">台鐵轉乘</span>`;
+            if(info.h) html += `<span class="badge badge-hsr">高鐵轉乘</span>`;
+            html += `<p style="font-size:12px; color:#666; margin:10px 0 0 0;">📌 ${info.note}</p>`;
+        }
+        html += `</div>`;
+
+        matches.forEach(m => {
+            const line = DATA[m.k];
+            html += `<div class="route-card">
+                <div class="route-header" style="background:${line.color}"><span>${line.name}</span><span>${m.id}</span></div>
+                <div class="arrival-item"><span style="font-weight:700;color:#555">${line.dir[0]}</span><span class="time-value">${Math.floor(Math.random()*6+1)}<span class="unit">分</span></span></div>
+                <div class="arrival-item"><span style="font-weight:700;color:#555">${line.dir[1]}</span><span class="time-value">${Math.floor(Math.random()*6+1)}<span class="unit">分</span></span></div>
+            </div>`;
+        });
+        board.innerHTML = html;
+        
+        // 每次重新渲染後，將捲軸拉回頂部
+        board.scrollTop = 0;
+    }
+</script>
+</body>
+</html>
